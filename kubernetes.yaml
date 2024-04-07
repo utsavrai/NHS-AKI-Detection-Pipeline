@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: aki-detection-state
+  namespace: peace
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: managed-csi
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aki-detection
+  namespace: peace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aki-detection
+  template:
+    metadata:
+      labels:
+        app: aki-detection
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/path: '/metrics'
+        prometheus.io/port: '8000'
+    spec:
+      containers:
+      - name: aki-detection
+        image: imperialswemlsspring2024.azurecr.io/coursework6-peace
+        command: ["/app/main.py"]
+        args:
+          - "--history=/hospital-history/history.csv"
+        env:
+        - name: HISTORY_PATH
+          value: /hospital-history/history.csv
+        - name: MLLP_ADDRESS
+          value: peace-simulator.coursework6:8440
+        - name: PAGER_ADDRESS
+          value: peace-simulator.coursework6:8441
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        volumeMounts:
+          - mountPath: "/hospital-history"
+            name: hospital-history
+            readOnly: true
+          - mountPath: "/state"
+            name: aki-detection-state
+        resources:
+          requests:
+            memory: 1Gi
+            cpu: 1
+        ports:
+        - containerPort: 8000
+          name: metrics
+      initContainers:
+      - name: copy-hospital-history
+        image: imperialswemlsspring2024.azurecr.io/coursework6-history
+        volumeMounts:
+          - mountPath: "/hospital-history"
+            name: hospital-history
+          - mountPath: "/state"
+            name: aki-detection-state
+        resources:
+          requests:
+            memory: 1Gi
+            cpu: 1
+      volumes:
+      - name: hospital-history
+        emptyDir:
+          sizeLimit: 50Mi
+      - name: aki-detection-state
+        persistentVolumeClaim:
+          claimName: aki-detection-state
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aki-detection-metrics
+  namespace: peace
+spec:
+  selector:
+    app: aki-detection
+  ports:
+  - name: metrics
+    protocol: TCP
+    port: 8000
+    targetPort: metrics
